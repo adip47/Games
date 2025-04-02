@@ -1,0 +1,199 @@
+# End-to-End CI/CD Pipeline for IPL Schedule Generator
+
+## Overview
+This document outlines the complete **CI/CD pipeline** setup for automating the testing, deployment, and execution of the **IPL Schedule Generator**. The pipeline uses **GitHub Actions** for automation and deploys the script to **AWS (Lambda, EC2, or Kubernetes)** for execution.
+
+---
+
+## CI/CD Pipeline Flow
+1. **Code Push**: Developer pushes code to GitHub.
+2. **Continuous Integration (CI)**:
+   - Runs **unit tests** (if applicable).
+   - Performs **linting** for clean code.
+   - Builds the project.
+3. **Continuous Deployment (CD)**:
+   - Deploys to **AWS Lambda, EC2, or Kubernetes**.
+   - Runs the script automatically after deployment.
+   - Sends a notification upon success/failure.
+
+---
+
+## Folder Structure
+```
+📁 IPL-Schedule-Generator
+ ├── .github/workflows/
+ │   ├── ci-cd-pipeline.yml      # GitHub Actions pipeline
+ ├── src/
+ │   ├── ipl_schedule_generator.py   # Main Python script
+ ├── Dockerfile                   # Docker container setup
+ ├── kubernetes/
+ │   ├── deployment.yaml           # Kubernetes deployment manifest
+ ├── requirements.txt            # Dependencies (if needed)
+ ├── README.md                   # Project Documentation
+```
+
+---
+
+## GitHub Actions Workflow (CI/CD)
+Create the following file inside `.github/workflows/ci-cd-pipeline.yml`:
+
+```yaml
+name: IPL Schedule CI/CD
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run IPL Schedule Script
+        run: python src/ipl_schedule_generator.py
+
+      - name: Build Docker Image
+        run: |
+          docker build -t ipl-schedule-generator .
+
+      - name: Deploy to Kubernetes
+        if: success()
+        run: |
+          kubectl apply -f kubernetes/deployment.yaml
+
+      - name: Notify on Slack (Optional)
+        if: always()
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_MESSAGE: "CI/CD Pipeline Completed. Check Deployment Logs."
+```
+
+---
+
+## Docker Setup
+Create a `Dockerfile`:
+```dockerfile
+FROM python:3.10
+WORKDIR /app
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+CMD ["python", "src/ipl_schedule_generator.py"]
+```
+
+Build and run the container locally:
+```sh
+docker build -t ipl-schedule-generator .
+docker run --rm ipl-schedule-generator
+```
+
+---
+
+## Kubernetes Deployment
+Create `kubernetes/deployment.yaml`:
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ipl-schedule
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ipl-schedule
+  template:
+    metadata:
+      labels:
+        app: ipl-schedule
+    spec:
+      containers:
+      - name: ipl-schedule
+        image: ipl-schedule-generator:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
+```
+
+Apply the deployment:
+```sh
+kubectl apply -f kubernetes/deployment.yaml
+```
+
+Expose as a service (Optional):
+```sh
+kubectl expose deployment ipl-schedule --type=LoadBalancer --port=80
+```
+
+---
+
+## AWS Deployment Options
+### **Option 1: Deploy on EC2**
+1. **Launch an EC2 Instance** (Ubuntu).
+2. **Install Python**:
+   ```sh
+   sudo apt update && sudo apt install python3-pip -y
+   ```
+3. **Enable GitHub SSH Deployment**:
+   - Add `AWS_SSH_KEY` secret in GitHub.
+   - Run script using:
+     ```sh
+     python3 /home/ubuntu/ipl_script/ipl_schedule_generator.py
+     ```
+
+### **Option 2: Deploy as AWS Lambda**
+1. Package the script:
+   ```sh
+   zip -r ipl_lambda.zip ipl_schedule_generator.py
+   ```
+2. Upload to Lambda using AWS CLI:
+   ```sh
+   aws lambda update-function-code --function-name IPLSchedule --zip-file fileb://ipl_lambda.zip
+   ```
+3. Run with API Gateway or a **cron trigger**.
+
+---
+
+## Automate with AWS EventBridge (For Lambda)
+If using Lambda, schedule automatic execution using **AWS EventBridge**:
+```sh
+aws events put-rule --schedule-expression "rate(1 day)" --name IPLScheduler
+aws lambda add-permission --function-name IPLSchedule --statement-id 1 --action "lambda:InvokeFunction" --principal "events.amazonaws.com"
+aws events put-targets --rule IPLScheduler --targets "Id"="1","Arn"="arn:aws:lambda:region:account-id:function:IPLSchedule"
+```
+
+---
+
+## Monitoring Deployment
+- **EC2**: Check logs with `cat /home/ubuntu/ipl_script/logs.txt`.
+- **Lambda**: Test execution from AWS Console.
+- **Kubernetes**: Monitor pod status with `kubectl get pods`.
+- **GitHub Actions**: Monitor CI/CD logs.
+
+---
+
+## Conclusion
+This CI/CD pipeline ensures:
+✅ Automated testing and deployment.
+✅ Running the script on AWS, Docker, and Kubernetes seamlessly.
+✅ Notifications for success/failure.
+
+
+
